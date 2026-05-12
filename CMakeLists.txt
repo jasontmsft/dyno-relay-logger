@@ -85,6 +85,8 @@ add_library(dynorelaylogger_lib
     src/GatherSystemInfo.h
     src/Heartbeat.cpp
     src/Heartbeat.h
+    src/MdsdClient.cpp
+    src/MdsdClient.h
     src/MetricSink.cpp
     src/MetricSink.h
     src/DynoRelayServer.cpp

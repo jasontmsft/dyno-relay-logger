@@ -11,7 +11,6 @@
 #pragma once
 
 #include "GatherSystemInfo.h"
-#include "StatsCollector.h"
 
 #include <atomic>
 #include <chrono>
@@ -42,7 +41,6 @@ class Heartbeat {
   using MessageCallback = std::function<void(const std::string&)>;
 
   Heartbeat(std::shared_ptr<GatherSystemInfo> sysinfo,
-            std::shared_ptr<StatsCollector> stats,
             MessageCallback callback,
             std::chrono::seconds interval = std::chrono::seconds(1200));
 
@@ -62,11 +60,8 @@ class Heartbeat {
 
  private:
   void loop();
-  nlohmann::json buildDynologSystemInfoJson();
-  nlohmann::json buildDynologDaemonJson(const nlohmann::json& info);
 
   std::shared_ptr<GatherSystemInfo> sysinfo_;
-  std::shared_ptr<StatsCollector> stats_;
   MessageCallback callback_;
   std::chrono::seconds interval_;
   std::atomic<bool> running_{false};

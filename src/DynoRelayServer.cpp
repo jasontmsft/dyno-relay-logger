@@ -141,8 +141,61 @@ void DynoRelayServer::processMessage(const std::string& msg) {
       }
     }
 
-    json_data = data.dump();
+    // split out poorly formed network metrics from cpu metrics and reformat
+    // into array of objects
+    if (entity == "dynolog_cpu_monitor" && data.contains("cpu_util")) {
+      /*
+      assume data looks like this:
+        {
+        "cpu_guest": "0.000",
+        "cpu_guest_ms": 0,
+        ...
+        "hostname": "aifx-clou00000F",
+        ...
+        "rx_bytes.eth0": 166740,
+        "rx_bytes.eth1": 175450,
+        ...
+        "rx_drops.eth0": 0,
+        "rx_drops.eth1": 0,
+        ...
+        "session_uuid": "fd016bd9-6ade-432e-96f1-ee9c798aca2a",
+        ...
+        "tx_bytes.eth0": 1255480,
+        "tx_bytes.eth1": 1298734,
+        ...}
 
+        If the name prefix is "rx_" or "tx_" then transform to array.
+      */
+      json cpu = json::object();
+      std::map<std::string, std::map<std::string, int>> netMap;
+
+      for (auto it = data.begin(); it != data.end(); ++it) {
+        const std::string& key = it.key();
+        if (key.rfind("rx_", 0) == 0 || key.rfind("tx_", 0) == 0) {
+          // "rx_bytes.eth0": 166740,
+          size_t pos = key.find('.');
+
+          if (pos != std::string::npos) {
+            std::string first = key.substr(0, pos);
+            std::string second = key.substr(pos + 1);
+            netMap[second][first] = it.value();
+          }
+        } else {
+          cpu[key] = it.value();
+        }
+      }
+
+      cpu["network_interfaces"] = json::array();
+      for (const auto& [outer_key, inner_map] : netMap) {
+        json nic = json(inner_map);
+        nic["interface"] = outer_key;
+        cpu["network_interfaces"].push_back(nic);
+      }
+
+      data = cpu;
+    }
+
+    json_data = data.dump();
     int64_t bytes = static_cast<int64_t>(json_data.size());
 
     if (FLAGS_verbose) {
@@ -391,7 +444,7 @@ void DynoRelayServer::run() {
 
   // Start heartbeat (sends system info every 20 minutes)
   heartbeat_ = std::make_unique<Heartbeat>(
-      sysinfo_, stats_,
+      sysinfo_,
       [this](const std::string& msg) { processMessage(msg); });
   heartbeat_->start();
 

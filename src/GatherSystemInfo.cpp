@@ -10,6 +10,7 @@
 
 #include "GatherSystemInfo.h"
 #include "DynoRelayServer.h"
+#include "MdsdClient.h"
 
 #include <azure/identity.hpp>
 #include <azure/messaging/eventhubs/producer_client.hpp>
@@ -32,7 +33,8 @@
 
 namespace dynorelaylogger {
 
-GatherSystemInfo::GatherSystemInfo() {
+GatherSystemInfo::GatherSystemInfo(std::shared_ptr<StatsCollector> stats)
+    : stats_(std::move(stats)) {
   uuid_t uuid;
   char uuid_str[37];
   uuid_generate(uuid);
@@ -50,7 +52,12 @@ GatherSystemInfo::GatherSystemInfo() {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
   } 
+  eh_send_available_ = false;
+}
+
+void GatherSystemInfo::verifyLoggingAvailable() {
   eh_send_available_ = verifyAzureEventHubsSendAccess();
+  mdsd_send_available_ = verifyMdsdSendAccess();
 }
 
 std::vector<GpuProcInfo> GatherSystemInfo::getGpuInfo() const {
@@ -67,6 +74,10 @@ bool GatherSystemInfo::isDcgmAvailable() const {
 
 bool GatherSystemInfo::isEventHubsAvailable() const {
   return eh_send_available_;
+}
+
+bool GatherSystemInfo::isMdsdAvailable() const {
+  return mdsd_send_available_;
 }
 
 std::string GatherSystemInfo::getClientId() const {
@@ -93,14 +104,7 @@ bool GatherSystemInfo::verifyAzureEventHubsSendAccess() {
     Azure::Messaging::EventHubs::EventDataBatchOptions batchOptions;
     auto batch = producer.CreateBatch(batchOptions);
 
-    nlohmann::json testPayload = {
-        {"t", std::time(nullptr)},
-        {"hostname", hostname_},
-        {"location", location_},
-        {"vmid", vmid_},
-        {"session_uuid", session_uuid_},
-        {"self_exe_sha256", self_exe_sha256_}
-    };
+    nlohmann::json testPayload = buildDynologDaemonJson(azure_system_info_);
     Azure::Messaging::EventHubs::Models::EventData event(testPayload.dump());
     batch.TryAdd(event);
 
@@ -121,8 +125,78 @@ bool GatherSystemInfo::verifyAzureEventHubsSendAccess() {
   return false;
 }
 
+bool GatherSystemInfo::verifyMdsdSendAccess() {
+  LOG(INFO) << "Verifying mdsd djson send access";
+  MdsdClient client(stats_);
+  std::string payload = buildDynologDaemonJson(azure_system_info_).dump();
+  return client.sendSync(payload, "dynolog_daemon");
+}
+
 nlohmann::json GatherSystemInfo::getAzureSystemInfo() const {
   return azure_system_info_;
+}
+
+nlohmann::json GatherSystemInfo::buildDynologSystemInfoJson(
+    const nlohmann::json& client_info) {
+  nlohmann::json info = getAzureSystemInfo();
+  info["t"] = std::time(nullptr);
+
+  info["nvidia_gpu_count"] = static_cast<int>(gpus_.size());
+  nlohmann::json gpu_array = nlohmann::json::array();
+  for (int i = 0; i < static_cast<int>(gpus_.size()); ++i) {
+    const auto& gpu = gpus_[i];
+    gpu_array.push_back({
+        {"number", i},
+        {"model", gpu.model},
+        {"uuid", gpu.uuid},
+        {"irq", gpu.irq},
+        {"bios", gpu.bios},
+        {"bus_type", gpu.bus_type},
+        {"bus_location", gpu.bus_location},
+        {"device_minor", gpu.device_minor},
+        {"firmware", gpu.firmware}
+    });
+  }
+  info["nvidia_gpu_info"] = gpu_array;
+
+  nlohmann::json nic_array = nlohmann::json::array();
+  for (int i = 0; i < static_cast<int>(nics_.size()); ++i) {
+    const auto& nic = nics_[i];
+    nic_array.push_back({
+        {"number", i},
+        {"interface", nic.interface},
+        {"device_id", nic.device_id},
+        {"firmware", nic.firmware},
+        {"numa_node", nic.numa_node},
+        {"speed", nic.speed},
+        {"state", nic.state},
+        {"sys_image_guid", nic.sys_image_guid}
+    });
+  }
+  info["network_interfaces"] = nic_array;
+  info["client_info"] = client_info;
+
+  return info;
+}
+
+nlohmann::json GatherSystemInfo::buildDynologDaemonJson(
+    const nlohmann::json& info) {
+  auto snap = stats_->snapshot();
+  nlohmann::json hb;
+  hb["machine_id"] = info.value("machine_id", "");
+  hb["hostname"] = hostname_;
+  hb["location"] = location_;
+  hb["vmid"] = vmid_;
+  hb["session_uuid"] = session_uuid_;
+  hb["t"] = std::time(nullptr);
+  hb["log_data_rx_bytes_1m"] = snap.aggregate.rx.one_minute.bytes;
+  hb["log_data_rx_bytes_5m"] = snap.aggregate.rx.five_minutes.bytes;
+  hb["log_data_rx_bytes_1h"] = snap.aggregate.rx.one_hour.bytes;
+  hb["log_data_tx_bytes_1m"] = snap.aggregate.tx.one_minute.bytes;
+  hb["log_data_tx_bytes_5m"] = snap.aggregate.tx.five_minutes.bytes;
+  hb["log_data_tx_bytes_1h"] = snap.aggregate.tx.one_hour.bytes;
+
+  return hb;
 }
 
 std::string GatherSystemInfo::parseNvidiaInfoValue(const std::string& line) {

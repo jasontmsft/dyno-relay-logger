@@ -11,6 +11,7 @@
 #pragma once
 
 #include "AeHubsClient.h"
+#include "MdsdClient.h"
 
 #include <fstream>
 #include <map>
@@ -66,6 +67,20 @@ class AeHubsSink : public MetricSink {
 
  private:
   std::shared_ptr<AeHubsClient> forwarder_;
+};
+
+// Forwards metrics to mdsd via the djson UNIX-domain-socket protocol.
+class MdsdSink : public MetricSink {
+ public:
+  explicit MdsdSink(std::shared_ptr<MdsdClient> forwarder);
+
+  std::string name() const override { return "mdsd"; }
+
+  bool forward(const std::string& json_data,
+               const std::string& entity) override;
+
+ private:
+  std::shared_ptr<MdsdClient> forwarder_;
 };
 
 }  // namespace dynorelaylogger

@@ -72,4 +72,14 @@ bool AeHubsSink::forward(const std::string& json_data,
   return forwarder_->forwardMetrics(json_data, entity);
 }
 
+// ─── MdsdSink ───────────────────────────────────────────────────────────────
+
+MdsdSink::MdsdSink(std::shared_ptr<MdsdClient> forwarder)
+    : forwarder_(std::move(forwarder)) {}
+
+bool MdsdSink::forward(const std::string& json_data,
+                       const std::string& entity) {
+  return forwarder_->forwardMetrics(json_data, entity);
+}
+
 }  // namespace dynorelaylogger

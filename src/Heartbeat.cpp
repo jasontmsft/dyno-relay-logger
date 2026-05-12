@@ -15,11 +15,9 @@
 namespace dynorelaylogger {
 
 Heartbeat::Heartbeat(std::shared_ptr<GatherSystemInfo> sysinfo,
-                     std::shared_ptr<StatsCollector> stats,
                      MessageCallback callback,
                      std::chrono::seconds interval)
     : sysinfo_(std::move(sysinfo)),
-      stats_(std::move(stats)),
       callback_(std::move(callback)),
       interval_(interval) {}
 
@@ -44,72 +42,6 @@ void Heartbeat::stop() {
   }
 }
 
-nlohmann::json Heartbeat::buildDynologDaemonJson(const nlohmann::json& info) {
-  std::string hostname, location, vmid, session_uuid;
-  sysinfo_->getHostLocationId(hostname, location, vmid, session_uuid);
-  auto snap = stats_->snapshot();
-
-  nlohmann::json hb;
-  hb["machine_id"] = info.value("machine_id", "");
-  hb["hostname"] = hostname;
-  hb["location"] = location;
-  hb["vmid"] = vmid;
-  hb["session_uuid"] = session_uuid;
-  hb["t"] = std::time(nullptr);
-  hb["rx_bytes_1m"] = snap.aggregate.rx.one_minute.bytes;
-  hb["rx_bytes_5m"] = snap.aggregate.rx.five_minutes.bytes;
-  hb["rx_bytes_1h"] = snap.aggregate.rx.one_hour.bytes;
-  hb["tx_bytes_1m"] = snap.aggregate.tx.one_minute.bytes;
-  hb["tx_bytes_5m"] = snap.aggregate.tx.five_minutes.bytes;
-  hb["tx_bytes_1h"] = snap.aggregate.tx.one_hour.bytes;
-
-  return hb;
-}
-
-nlohmann::json Heartbeat::buildDynologSystemInfoJson() {
-  nlohmann::json info = sysinfo_->getAzureSystemInfo();
-  info["t"] = std::time(nullptr);
-
-  auto gpus = sysinfo_->getGpuInfo();
-  info["nvidia_gpu_count"] = static_cast<int>(gpus.size());
-  nlohmann::json gpu_array = nlohmann::json::array();
-  for (int i = 0; i < static_cast<int>(gpus.size()); ++i) {
-    const auto& gpu = gpus[i];
-    gpu_array.push_back({
-        {"number", i},
-        {"model", gpu.model},
-        {"uuid", gpu.uuid},
-        {"irq", gpu.irq},
-        {"bios", gpu.bios},
-        {"bus_type", gpu.bus_type},
-        {"bus_location", gpu.bus_location},
-        {"device_minor", gpu.device_minor},
-        {"firmware", gpu.firmware}
-    });
-  }
-  info["nvidia_gpu_info"] = gpu_array;
-
-  auto nics = sysinfo_->getNicInfo();
-  nlohmann::json nic_array = nlohmann::json::array();
-  for (int i = 0; i < static_cast<int>(nics.size()); ++i) {
-    const auto& nic = nics[i];
-    nic_array.push_back({
-        {"number", i},
-        {"interface", nic.interface},
-        {"device_id", nic.device_id},
-        {"firmware", nic.firmware},
-        {"numa_node", nic.numa_node},
-        {"speed", nic.speed},
-        {"state", nic.state},
-        {"sys_image_guid", nic.sys_image_guid}
-    });
-  }
-  info["nic_info"] = nic_array;
-  info["client_info"] = getClientIds();
-
-  return info;
-}
-
 void Heartbeat::loop() {
   // Wait 60 seconds before first heartbeat
   {
@@ -121,14 +53,14 @@ void Heartbeat::loop() {
   // Send immediately on startup, then every interval
   while (running_.load()) {
     try {
-      nlohmann::json info = buildDynologSystemInfoJson();
+      nlohmann::json info = sysinfo_->buildDynologSystemInfoJson(getClientIds());
 
       std::string msg = "::dynolog_system_info," + info.dump();
       callback_(msg);
       LOG(INFO) << "Heartbeat sent system info";
 
       // Send daemon stats heartbeat
-      nlohmann::json hb = buildDynologDaemonJson(info);
+      nlohmann::json hb = sysinfo_->buildDynologDaemonJson(info);
 
       std::string hb_msg = "::dynolog_daemon," + hb.dump();
       callback_(hb_msg);

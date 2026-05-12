@@ -26,10 +26,12 @@ DEFINE_int32(info_port, 1779,
              "Port for the info service (GetStats)");
 DEFINE_string(forward, "",
               "Comma-separated list of forwarding sinks to enable. \n"
-              "Options: file, aehubs\n"
+              "Options: file, aehubs, mdsd\n"
               "  file - forward metrics to local files in "
                 "/tmp/dyno-relay-logger/ for debugging. \n"
               "  aehubs - forward metrics to Azure Event Hubs (Azure SDK). \n"
+              "  mdsd - forward metrics to mdsd via the djson UNIX socket "
+                "(/var/run/mdsd/dynodevlogs/default_djson.socket). \n"
               "Default: empty (drop all metrics)");
 DEFINE_bool(verbose, false,
             "Echo all received metrics to stdout");
@@ -58,11 +60,12 @@ int main(int argc, char* argv[]) {
   std::signal(SIGINT, signalHandler);
   std::signal(SIGTERM, signalHandler);
 
-  // Create shared system info (once)
-  auto sysinfo = std::make_shared<dynorelaylogger::GatherSystemInfo>();
-
   // Create shared stats collector (shared with AeHubsClient for drop tracking)
   auto stats = std::make_shared<dynorelaylogger::StatsCollector>();
+
+  // Create shared system info (once)
+  auto sysinfo = std::make_shared<dynorelaylogger::GatherSystemInfo>(stats);
+  sysinfo->verifyLoggingAvailable();
 
   // Parse --forward flag and construct sinks
   std::vector<std::shared_ptr<dynorelaylogger::MetricSink>> sinks;
@@ -89,8 +92,16 @@ int main(int argc, char* argv[]) {
         forwarder->start();
         sinks.push_back(
             std::make_shared<dynorelaylogger::AeHubsSink>(forwarder));
+      } else if (token == "mdsd") {
+        LOG(INFO) << "Enabling mdsd (djson) sink...";
+        auto forwarder =
+            std::make_shared<dynorelaylogger::MdsdClient>(stats);
+        forwarder->start();
+        sinks.push_back(
+            std::make_shared<dynorelaylogger::MdsdSink>(forwarder));
       } else {
-        LOG(ERROR) << "Unknown sink: '" << token << "' (valid: file, aehubs)";
+        LOG(ERROR) << "Unknown sink: '" << token
+                   << "' (valid: file, aehubs, mdsd)";
         return 1;
       }
     }

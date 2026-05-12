@@ -10,9 +10,12 @@
 
 #pragma once
 
+#include "StatsCollector.h"
+
 #include <nlohmann/json.hpp>
 
 #include <list>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -44,7 +47,7 @@ struct NicInfo {
 // Gathers Azure system info, GPU info, and Event Hub SAS keys
 class GatherSystemInfo {
  public:
-  GatherSystemInfo();
+  GatherSystemInfo(std::shared_ptr<StatsCollector> stats);
 
   std::vector<GpuProcInfo> getGpuInfo() const;
   std::vector<NicInfo> getNicInfo() const;
@@ -53,10 +56,15 @@ class GatherSystemInfo {
                          std::string& vmid, std::string& session_uuid) const;
   bool isDcgmAvailable() const;
   bool isEventHubsAvailable() const;
+  bool isMdsdAvailable() const;
   std::string getClientId() const;
   std::string getEhNamespace() const;
+  void verifyLoggingAvailable();
+  nlohmann::json buildDynologSystemInfoJson(const nlohmann::json& client_info);
+  nlohmann::json buildDynologDaemonJson(const nlohmann::json& info);
 
  private:
+  std::shared_ptr<StatsCollector> stats_;
   std::string eh_namespace_;
   std::string hostname_;
   std::string location_;
@@ -65,6 +73,7 @@ class GatherSystemInfo {
   std::vector<NicInfo> nics_;
   bool dcgm_available_ = false;
   bool eh_send_available_ = false;
+  bool mdsd_send_available_ = false;
   nlohmann::json azure_system_info_;
   std::string session_uuid_;
   std::string self_exe_sha256_;
@@ -76,6 +85,7 @@ class GatherSystemInfo {
   void fetchImdsMetadata(const std::list<std::string>& computeKeys);
   void gatherAzureMetadata();
   bool verifyAzureEventHubsSendAccess();
+  bool verifyMdsdSendAccess();
   std::string parseNvidiaInfoValue(const std::string& s);
   static size_t curlWriteFunction(void* contents, size_t size, size_t nmemb,
                               std::string* data);

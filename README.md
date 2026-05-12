@@ -80,22 +80,32 @@ Third-party dependencies built from source (in `third_party/`):
 
 ```bash
 git submodule update --init --recursive
-mkdir build && cd build
+mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build . -j4
+cmake --build . -j$(nproc)
 ```
 
-If the Rust `openssl-sys` crate fails to find OpenSSL, set the library path before building:
+The Rust `openssl-sys` crate (pulled in by the Azure SDK's AMQP layer) often fails to locate the system OpenSSL on stock Ubuntu/Debian. If the build fails with `OpenSSL libdir … does not contain the required files`, export these before re-running `cmake --build`:
 
 ```bash
 export OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu
 export OPENSSL_INCLUDE_DIR=/usr/include/openssl
 ```
 
+Three binaries are produced in `build/`:
+
+| Binary | Purpose |
+|--------|---------|
+| `dynorelaylogger` | The relay server |
+| `dynorelayloggerinfo` | CLI that calls `getStats` JSON-RPC against a running server |
+| `cpu_logger` | Example dynolog-style client that emits CPU metrics over the UDS |
+
+There are no tests, linters, or formatters configured in this project.
+
 ### Running
 
 ```bash
-./dynorelaylogger [--logger_socket=/var/run/dyno-relay-logger.sock] [--forward=aehubs] [--verbose]
+./dynorelaylogger --forward=file,aehubs --logger_socket=/var/run/dyno-relay-logger.sock --verbose
 ```
 
 **Flags:**
@@ -124,6 +134,7 @@ Multiple sinks can be enabled simultaneously (e.g., `--forward=file,aehubs`).
 │   ├── main.cpp                    # Entry point and flag definitions
 │   ├── DynoRelayServer.h/cpp       # Unix socket listener and message dispatch
 │   ├── AeHubsClient.h/cpp          # Azure SDK Event Hubs client (managed identity, batched)
+│   ├── MdsdClient.h/cpp            # MDSD logging client
 │   ├── GatherSystemInfo.h/cpp      # Azure IMDS metadata, GPU/NIC discovery, credential verification
 │   ├── Heartbeat.h/cpp             # Periodic heartbeats and client tracking
 │   ├── MetricSink.h/cpp            # Sink interface (FileSink, AeHubsSink)
@@ -131,8 +142,10 @@ Multiple sinks can be enabled simultaneously (e.g., `--forward=file,aehubs`).
 │   ├── dynorelayloggerinfo.cpp     # CLI tool to query stats via JSON RPC
 │   └── rpc/
 │       └── SimpleJsonServer.h/cpp  # JSON RPC server for the info service
-└── third_party/                    # External dependencies
-    ├── azure-sdk-for-cpp/          # Azure SDK (Event Hubs, Identity)
+├── examples/
+│   └── cpu_logger.cpp              # Example dynolog-style CPU metrics client
+└── third_party/                    # External dependencies (all built from source)
+    ├── azure-sdk-for-cpp/          # Azure SDK (Event Hubs, Identity, Key Vault)
     ├── curl/
     ├── fmt/
     ├── gflags/

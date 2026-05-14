@@ -60,10 +60,10 @@ const std::map<std::string, MdsdClient::Route>& MdsdClient::entityRoutes() {
   // mdsd keys schema registration by (source, schema_id); changing either
   // value forces re-registration.
   static const std::map<std::string, Route> kTable = {
-      {"dynolog_daemon",           {"daemon",          0xDA010001ULL}},
-      {"dynolog_cpu_monitor",      {"cpuMonitor",      0xDA010002ULL}},
-      {"dynolog_system_info",      {"systemInfo",      0xDA010003ULL}},
-      {"dynolog_dcgm_gpu_monitor", {"dcgmGpuMonitor",  0xDA010004ULL}},
+      {"dynolog_daemon",           {"dynoDaemon",          0xDA010001ULL}},
+      {"dynolog_cpu_monitor",      {"dynoCpuMonitor",      0xDA010002ULL}},
+      {"dynolog_system_info",      {"dynoSystemInfo",      0xDA010003ULL}},
+      {"dynolog_dcgm_gpu_monitor", {"dynoDcgmGpuMonitor",  0xDA010004ULL}},
   };
   return kTable;
 }

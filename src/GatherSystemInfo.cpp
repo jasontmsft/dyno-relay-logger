@@ -25,6 +25,7 @@
 #include <list>
 #include <map>
 #include <sstream>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <openssl/evp.h>
@@ -55,9 +56,16 @@ GatherSystemInfo::GatherSystemInfo(std::shared_ptr<StatsCollector> stats)
   eh_send_available_ = false;
 }
 
-void GatherSystemInfo::verifyLoggingAvailable() {
+void GatherSystemInfo::verifyMdsdDest(
+    const std::string& mdsd_socket_path) {
+  mdsd_send_available_ = verifyMdsdSendAccess(mdsd_socket_path);
+  if (mdsd_send_available_) {
+    mdsd_socket_path_ = mdsd_socket_path;
+  }
+}
+
+void GatherSystemInfo::verifyAeHubsDest() {
   eh_send_available_ = verifyAzureEventHubsSendAccess();
-  mdsd_send_available_ = verifyMdsdSendAccess();
 }
 
 std::vector<GpuProcInfo> GatherSystemInfo::getGpuInfo() const {
@@ -76,8 +84,12 @@ bool GatherSystemInfo::isEventHubsAvailable() const {
   return eh_send_available_;
 }
 
-bool GatherSystemInfo::isMdsdAvailable() const {
+bool GatherSystemInfo::isMdsdSocketAvailable() const {
   return mdsd_send_available_;
+}
+
+std::string GatherSystemInfo::getMdsdSocketPath() const {
+  return mdsd_socket_path_;
 }
 
 std::string GatherSystemInfo::getClientId() const {
@@ -125,11 +137,38 @@ bool GatherSystemInfo::verifyAzureEventHubsSendAccess() {
   return false;
 }
 
-bool GatherSystemInfo::verifyMdsdSendAccess() {
-  LOG(INFO) << "Verifying mdsd djson send access";
-  MdsdClient client(stats_);
+bool GatherSystemInfo::verifyMdsdSendAccess(
+    const std::string& mdsd_socket_path) {
+  LOG(INFO) << "Verifying mdsd djson send access on " << mdsd_socket_path;
+  MdsdClient client(stats_, mdsd_socket_path);
   std::string payload = buildDynologDaemonJson(azure_system_info_).dump();
   return client.sendSync(payload, "dynolog_daemon");
+}
+
+void GatherSystemInfo::discoverValidMdsdDest() {
+  for (const char* candidate : kMdsdSocketCandidates) {
+    struct stat st;
+    if (::stat(candidate, &st) != 0) {
+      LOG(INFO) << "Skipping mdsd djson candidate (does not exist): "
+                << candidate;
+      continue;
+    }
+    if (!S_ISSOCK(st.st_mode)) {
+      LOG(WARNING) << "Skipping mdsd djson candidate (not a socket): "
+                   << candidate;
+      continue;
+    }
+    if (verifyMdsdSendAccess(candidate)) {
+      LOG(INFO) << "Discovered working mdsd djson socket: " << candidate;
+      mdsd_send_available_ = true;
+      mdsd_socket_path_ = candidate;
+      return;
+    }
+  }
+  LOG(WARNING) << "No working mdsd djson socket found among "
+               << sizeof(kMdsdSocketCandidates) / sizeof(kMdsdSocketCandidates[0])
+               << " candidates";
+  mdsd_send_available_ = false;
 }
 
 nlohmann::json GatherSystemInfo::getAzureSystemInfo() const {

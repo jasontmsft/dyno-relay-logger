@@ -47,6 +47,13 @@ struct NicInfo {
 // Gathers Azure system info, GPU info, and Event Hub SAS keys
 class GatherSystemInfo {
  public:
+  static constexpr const char* kMdsdSocketCandidates[] = {
+      "/var/run/mdsd/dynolog/default_djson.socket",
+      "/var/run/mdsd/aisc/default_djson.socket",
+      "/var/run/mdsd/inframdsdaccount/default_djson.socket",
+      "/var/run/mdsd/default_djson.socket",
+  };
+
   GatherSystemInfo(std::shared_ptr<StatsCollector> stats);
 
   std::vector<GpuProcInfo> getGpuInfo() const;
@@ -56,10 +63,15 @@ class GatherSystemInfo {
                          std::string& vmid, std::string& session_uuid) const;
   bool isDcgmAvailable() const;
   bool isEventHubsAvailable() const;
-  bool isMdsdAvailable() const;
+  bool isMdsdSocketAvailable() const;
+  std::string getMdsdSocketPath() const;
   std::string getClientId() const;
   std::string getEhNamespace() const;
-  void verifyLoggingAvailable();
+  void verifyMdsdDest(const std::string& mdsd_socket_path);
+  void verifyAeHubsDest();
+  // Probes each path in kMdsdSocketCandidates in order; returns the first
+  // socket that accepts a send-access probe, or "" if none responded.
+  void discoverValidMdsdDest();
   nlohmann::json buildDynologSystemInfoJson(const nlohmann::json& client_info);
   nlohmann::json buildDynologDaemonJson(const nlohmann::json& info);
 
@@ -74,6 +86,7 @@ class GatherSystemInfo {
   bool dcgm_available_ = false;
   bool eh_send_available_ = false;
   bool mdsd_send_available_ = false;
+  std::string mdsd_socket_path_;
   nlohmann::json azure_system_info_;
   std::string session_uuid_;
   std::string self_exe_sha256_;
@@ -85,7 +98,7 @@ class GatherSystemInfo {
   void fetchImdsMetadata(const std::list<std::string>& computeKeys);
   void gatherAzureMetadata();
   bool verifyAzureEventHubsSendAccess();
-  bool verifyMdsdSendAccess();
+  bool verifyMdsdSendAccess(const std::string& mdsd_socket_path);
   std::string parseNvidiaInfoValue(const std::string& s);
   static size_t curlWriteFunction(void* contents, size_t size, size_t nmemb,
                               std::string* data);

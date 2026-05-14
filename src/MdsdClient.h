@@ -39,11 +39,9 @@ class MdsdClient {
   static constexpr size_t kMaxQueueDepth = 100;
   static constexpr int kFlushIntervalSeconds = 30;
   static constexpr size_t kMaxMsgDataSize = 128 * 1024 - 1;
-  static constexpr const char* kDefaultSocketPath =
-      "/var/run/mdsd/dynodevlogs/default_djson.socket";
 
-  explicit MdsdClient(std::shared_ptr<StatsCollector> stats,
-                      std::string socket_path = kDefaultSocketPath);
+  MdsdClient(std::shared_ptr<StatsCollector> stats,
+             std::string socket_path);
   ~MdsdClient();
 
   void start();

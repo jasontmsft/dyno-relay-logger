@@ -16,12 +16,18 @@
 #include <glog/logging.h>
 
 #include <csignal>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <vector>
 
 DEFINE_string(logger_socket, "/var/run/dyno-relay-logger.sock",
               "Unix domain socket path for the logger listener");
+DEFINE_string(mdsd_socket, "",
+              "Unix domain socket path for the mdsd djson sink. If not set, defaults to discoverValidMdsdDest().");
+DEFINE_bool(show_mdsd_socket_discovery_list, false,
+            "Print the contents of GatherSystemInfo::kMdsdSocketCandidates "
+            "and exit.");
 DEFINE_int32(info_port, 1779,
              "Port for the info service (GetStats)");
 DEFINE_string(forward, "",
@@ -54,18 +60,40 @@ int main(int argc, char* argv[]) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   FLAGS_logtostderr = true;
 
+  if (FLAGS_show_mdsd_socket_discovery_list) {
+    for (const char* candidate :
+         dynorelaylogger::GatherSystemInfo::kMdsdSocketCandidates) {
+      std::cout << candidate << "\n";
+    }
+    return 0;
+  }
+
   LOG(INFO) << "Starting DynoRelayLogger...";
 
   // Set up signal handlers for graceful shutdown
   std::signal(SIGINT, signalHandler);
   std::signal(SIGTERM, signalHandler);
 
-  // Create shared stats collector (shared with AeHubsClient for drop tracking)
+  // Create shared stats collector (shared with logging Clients for drop tracking)
   auto stats = std::make_shared<dynorelaylogger::StatsCollector>();
 
   // Create shared system info (once)
   auto sysinfo = std::make_shared<dynorelaylogger::GatherSystemInfo>(stats);
-  sysinfo->verifyLoggingAvailable();
+
+  // if mdsd is enabled, verify send access before starting the server and sinks that depend on it.
+  if (FLAGS_forward.find("mdsd") != std::string::npos) {
+    if (FLAGS_mdsd_socket.empty()) {
+      LOG(INFO) << "discovering valid Mdsd emitters...";
+      sysinfo->discoverValidMdsdDest();
+    } else {
+      sysinfo->verifyMdsdDest(FLAGS_mdsd_socket);
+    }
+  }
+
+  // if aehubs is enabled, verify send access before starting the server and sinks that depend on it.
+  if (FLAGS_forward.find("aehubs") != std::string::npos) {
+    sysinfo->verifyAeHubsDest();
+  }
 
   // Parse --forward flag and construct sinks
   std::vector<std::shared_ptr<dynorelaylogger::MetricSink>> sinks;
@@ -93,9 +121,13 @@ int main(int argc, char* argv[]) {
         sinks.push_back(
             std::make_shared<dynorelaylogger::AeHubsSink>(forwarder));
       } else if (token == "mdsd") {
+        if (!sysinfo->isMdsdSocketAvailable()) {
+          LOG(WARNING) << "Skipping mdsd sink: send access not verified";
+          continue;
+        }
         LOG(INFO) << "Enabling mdsd (djson) sink...";
-        auto forwarder =
-            std::make_shared<dynorelaylogger::MdsdClient>(stats);
+        auto forwarder = std::make_shared<dynorelaylogger::MdsdClient>(
+            stats, sysinfo->getMdsdSocketPath());
         forwarder->start();
         sinks.push_back(
             std::make_shared<dynorelaylogger::MdsdSink>(forwarder));
